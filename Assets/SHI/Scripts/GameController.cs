@@ -89,6 +89,8 @@ namespace SHI.Client
             Next();
         }
 
+        public void ShowPerson(Person person) { hud.ShowPerson(game, person, Next); }
+
         public void SetRation(Ration ration) { game.Ration = ration; Next(); }
         public void ToggleShield() { game.SetShieldBoost(!game.ShieldBoost); Next(); }
         public void BeginPlacing(BuildingType type) { placing = type; Next(); }
@@ -208,13 +210,22 @@ namespace SHI.Client
             yield return Shot("01_day1");
             yield return ClickTest();
 
+            ShowPerson(game.People[0]);
+            yield return Shot("01b_person_yun");
+            Next();
+            var crowded = new Core.Game(12);
+            for (int i = 0; i < 5; i++) crowded.AddPerson("r" + i, "새 사람 " + i, "떠돌이", "길에서 받아들였다.", Role.Rest, 0, Temperaments.All[i * 5], i == 2);
+            hud.Refresh(crowded, null);
+            yield return Shot("01c_ten_people");
+            Next();
+
             BeginPlacing(BuildingType.Workshop);
             yield return new WaitForSeconds(0.2f);
             world.ShowGhost(BuildingType.Workshop, 8, 8, true);
             yield return Shot("02_placing");
             PlaceAt(8, 8);
 
-            bool nightShot = false, raidShot = false, eventShot = false, majorShot = false, nightDone = false;
+            bool strangerShot = false, signShot = false, actShot = false, nightShot = false, raidShot = false, eventShot = false, majorShot = false, nightDone = false;
             int guard = 0;
             while (!game.IsOver && guard++ < 200)
             {
@@ -223,6 +234,9 @@ namespace SHI.Client
                 {
                     if (!eventShot) { eventShot = true; yield return new WaitForSeconds(0.2f); yield return Shot("03_event"); }
                     if (current.Id == "yun_medicine") { yield return Shot("04_yun_medicine"); }
+                    if (current.CountId == "영입" && !strangerShot) { strangerShot = true; yield return Shot("04b_stranger"); }
+                    if (current.Id.StartsWith("sign:") && !signShot) { signShot = true; yield return Shot("04c_sign"); }
+                    if (current.Id.StartsWith("act:") && !actShot) { actShot = true; yield return Shot("04d_act"); }
                     int option = current.Id == "yun_medicine" ? 2 : current.Id == "yun_ledger" ? 1 : current.Options.Select((o, i) => (o, i)).First(x => x.o.Available == null || x.o.Available(game)).i;
                     if (current.Major && !majorShot)
                     {
@@ -274,7 +288,7 @@ namespace SHI.Client
             }
             yield return new WaitForSeconds(0.5f);
             yield return Shot("10_end");
-            File.WriteAllText(Path.Combine(shotDir, "summary.txt"), $"uiClick={uiClick} day={game.Day} ending={game.Ending} morale={game.Morale} anger={game.Anger} detection={game.Detection}\nfired={string.Join(",", game.FiredEvents)}\n{string.Join("\n", game.Chronicle.Select(c => c.Text))}");
+            File.WriteAllText(Path.Combine(shotDir, "summary.txt"), $"uiClick={uiClick} day={game.Day} ending={game.Ending} morale={game.Morale} anger={game.Anger} detection={game.Detection}\npeople={string.Join(",", game.People.Select(p => p.Name + ":" + p.Temper.Name + ":" + p.Health))}\nfired={string.Join(",", game.FiredEvents)}\n{string.Join("\n", game.Chronicle.Select(c => c.Text))}");
 #if UNITY_EDITOR
             UnityEditor.EditorApplication.Exit(0);
 #else

@@ -25,6 +25,8 @@ namespace SHI.Client
             { Role.Food, "식량 수색" }, { Role.Battery, "배터리 회수" }, { Role.Guard, "경비" },
         };
 
+        static readonly Color[] RecruitColors = { new Color(0.45f, 0.95f, 0.72f), new Color(1f, 0.62f, 0.38f), new Color(0.55f, 0.72f, 1f), new Color(0.98f, 0.5f, 0.75f), new Color(0.85f, 0.92f, 0.45f) };
+
         Transform canvas;
         Transform topBar, leftPanel, rightPanel, bottomPanel, modalLayer;
         readonly Dictionary<string, Texture2D> portraits = new Dictionary<string, Texture2D>();
@@ -119,28 +121,40 @@ namespace SHI.Client
         void DrawPeople(Core.Game g)
         {
             Label(leftPanel, "사람들", 22, new Vector2(18, -26), new Vector2(320, 34), Ink, TextAnchor.MiddleLeft, FontStyle.Bold);
+            var living = g.People.Where(p => p.Health != Health.Gone && p.Health != Health.Dead).ToList();
+            float rowHeight = Mathf.Clamp(650f / Mathf.Max(1, living.Count), 56f, 94f);
+            bool compact = rowHeight < 90f;
             float y = -56;
-            foreach (var p in g.People.Where(p => p.Health != Health.Gone && p.Health != Health.Dead))
+            foreach (var p in living)
             {
-                Image(leftPanel, new Vector2(12, y - 44), new Vector2(332, 88), Row);
+                var person = p;
+                float inner = rowHeight - 6f, portraitSize = inner - 12f, textX = 18f + portraitSize + 8f, textW = 338f - textX;
+                Image(leftPanel, new Vector2(12, y - inner / 2f), new Vector2(332, inner), Row);
                 var portrait = new GameObject("Portrait", typeof(RectTransform)).AddComponent<RawImage>();
                 portrait.transform.SetParent(leftPanel, false);
-                Place(portrait.rectTransform, new Vector2(18, y - 44), new Vector2(76, 76));
+                Place(portrait.rectTransform, new Vector2(18, y - inner / 2f), new Vector2(portraitSize, portraitSize));
                 portrait.texture = Portrait(p.Id);
                 string state = p.Health == Health.Injured ? " · 부상" : p.Frail ? " · 일 못함" : "";
-                Label(leftPanel, $"{p.Name}{state}", 19, new Vector2(102, y - 20), new Vector2(236, 28), p.Health == Health.Injured ? new Color(1f, 0.55f, 0.55f) : Ink, TextAnchor.MiddleLeft, FontStyle.Bold);
-                Label(leftPanel, p.Title, 15, new Vector2(102, y - 42), new Vector2(120, 22), Quiet, TextAnchor.MiddleLeft);
-                if (p.CanWork && g.Phase == Phase.Day)
+                string temper = p.TemperKnown ? p.Temper.Name : "성향 파악 중";
+                Color nameColor = p.Health == Health.Injured ? new Color(1f, 0.55f, 0.55f) : Ink;
+                bool canAssign = p.CanWork && g.Phase == Phase.Day;
+                string role = canAssign ? RoleNames[p.Role] + " ▸" : p.CanWork ? RoleNames[p.Role] : "쉬는 중";
+                if (compact)
                 {
-                    var person = p;
-                    Button(leftPanel, RoleNames[p.Role] + "  ▸", 17, new Vector2(102, y - 68), new Vector2(232, 32), ButtonColor, () => controller.CycleRole(person));
+                    float half = (textW - 4f) / 2f;
+                    Label(leftPanel, $"{p.Name}{state}", 16, new Vector2(textX, y - inner * 0.27f), new Vector2(textW, 22), nameColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                    Button(leftPanel, temper, 13, new Vector2(textX, y - inner * 0.72f), new Vector2(half, inner * 0.46f), ButtonColor, () => controller.ShowPerson(person));
+                    if (canAssign) Button(leftPanel, role, 13, new Vector2(textX + half + 4f, y - inner * 0.72f), new Vector2(half, inner * 0.46f), ButtonColor, () => controller.CycleRole(person));
+                    else Label(leftPanel, role, 13, new Vector2(textX + half + 4f, y - inner * 0.72f), new Vector2(half, inner * 0.46f), Quiet, TextAnchor.MiddleCenter);
                 }
                 else
                 {
-                    string role = p.CanWork ? RoleNames[p.Role] : "쉬는 중";
-                    Label(leftPanel, role, 17, new Vector2(102, y - 68), new Vector2(232, 32), Quiet, TextAnchor.MiddleLeft);
+                    Label(leftPanel, $"{p.Name}{state}", 18, new Vector2(textX, y - 15), new Vector2(textW, 26), nameColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                    Button(leftPanel, $"{p.Title} · {temper}", 14, new Vector2(textX, y - 41), new Vector2(textW, 24), ButtonColor, () => controller.ShowPerson(person));
+                    if (canAssign) Button(leftPanel, role, 15, new Vector2(textX, y - 70), new Vector2(textW, 26), ButtonColor, () => controller.CycleRole(person));
+                    else Label(leftPanel, role, 15, new Vector2(textX, y - 70), new Vector2(textW, 26), Quiet, TextAnchor.MiddleLeft);
                 }
-                y -= 94;
+                y -= rowHeight;
             }
         }
 
@@ -225,8 +239,12 @@ namespace SHI.Client
             portrait.transform.SetParent(box, false);
             Place(portrait.rectTransform, new Vector2(28, -170), new Vector2(260, 280));
             portrait.texture = Portrait(e.SpeakerId);
-            Label(box, speaker != null ? speaker.Name : "", 22, new Vector2(28, -336), new Vector2(260, 34), Ink, TextAnchor.MiddleCenter, FontStyle.Bold);
+            Label(box, speaker != null ? speaker.Name : "낯선 사람", 22, new Vector2(28, -336), new Vector2(260, 34), Ink, TextAnchor.MiddleCenter, FontStyle.Bold);
             Label(box, speaker != null ? speaker.Title : "", 16, new Vector2(28, -364), new Vector2(260, 26), Quiet, TextAnchor.MiddleCenter);
+            if (speaker != null)
+                Button(box, speaker.TemperKnown ? $"성향: {speaker.Temper.Name}" : "성향 파악 중", 16, new Vector2(28, -400), new Vector2(260, 36), ButtonColor, () => controller.ShowPerson(speaker));
+            if (!string.IsNullOrEmpty(e.Reason))
+                Label(box, $"이 일이 일어난 확률\n{e.Reason}", 14, new Vector2(28, -490), new Vector2(260, 120), Quiet, TextAnchor.UpperLeft);
             Label(box, e.Title, 34, new Vector2(320, -52), new Vector2(630, 56), e.Major ? Art.Red : Art.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
             Label(box, e.Body(g), 22, new Vector2(320, -194), new Vector2(630, 190), Ink, TextAnchor.UpperLeft);
             float y = -300;
@@ -240,24 +258,80 @@ namespace SHI.Client
             }
         }
 
+        public void ShowPerson(Core.Game g, Person p, Action close)
+        {
+            Clear(modalLayer);
+            var box = ModalBox(1040, 680);
+            var portrait = new GameObject("Portrait", typeof(RectTransform)).AddComponent<RawImage>();
+            portrait.transform.SetParent(box, false);
+            Place(portrait.rectTransform, new Vector2(28, -140), new Vector2(220, 220));
+            portrait.texture = Portrait(p.Id);
+            Label(box, p.Name, 24, new Vector2(28, -272), new Vector2(220, 34), Ink, TextAnchor.MiddleCenter, FontStyle.Bold);
+            Label(box, p.Title, 16, new Vector2(28, -300), new Vector2(220, 24), Quiet, TextAnchor.MiddleCenter);
+            Label(box, p.Note, 15, new Vector2(28, -350), new Vector2(220, 70), Quiet, TextAnchor.UpperCenter);
+            Meter(box, "신뢰", p.Trust, new Vector2(28, -408), 220, Art.Cyan);
+            Meter(box, "불만", p.Grievance, new Vector2(28, -456), 220, new Color(1f, 0.44f, 0.22f));
+
+            Label(box, p.TemperKnown ? p.Temper.Name : "성향 파악 중", 32, new Vector2(280, -48), new Vector2(730, 50), Art.Amber, TextAnchor.MiddleLeft, FontStyle.Bold);
+            string description = p.TemperKnown ? p.Temper.Description : $"함께 지낸 지 얼마 되지 않아 아직 알 수 없다.\n첫인상: {p.Temper.FirstImpression}";
+            Label(box, description, 19, new Vector2(280, -102), new Vector2(730, 60), Ink, TextAnchor.UpperLeft);
+
+            if (p.TemperKnown)
+            {
+                var traits = new[] { ("자기보호", p.Temper.Self), ("공동체", p.Temper.Group), ("명예", p.Temper.Pride), ("탐욕", p.Temper.Greed), ("충동", p.Temper.Impulse), ("용기", p.Temper.Courage), ("연민", p.Temper.Empathy), ("앙심", p.Temper.Grudge), ("정직", p.Temper.Honesty), ("충성", p.Temper.Loyalty) };
+                for (int i = 0; i < traits.Length; i++)
+                    TraitBar(box, traits[i].Item1, traits[i].Item2, new Vector2(280 + (i % 2) * 370, -160 - (i / 2) * 32));
+
+                var tendencies = NpcBehaviors.All.Where(b => b.Gate(g, p)).Select(b => (b.Name, Percent: b.Odds(g, p).Percent)).Where(x => x.Percent >= 5).OrderByDescending(x => x.Percent).Take(4).Select(x => $"{x.Name} {NpcBehaviors.Tendency(x.Percent)}").ToList();
+                Label(box, "지금 벌일 법한 일", 18, new Vector2(280, -330), new Vector2(730, 28), Art.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
+                Label(box, tendencies.Count > 0 ? string.Join("  ·  ", tendencies) : "지금은 특별히 눈에 띄는 일이 없다.", 17, new Vector2(280, -360), new Vector2(730, 30), Ink, TextAnchor.MiddleLeft);
+            }
+
+            Label(box, "이 사람의 기록", 18, new Vector2(280, -402), new Vector2(730, 28), Art.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
+            var diary = p.Diary.Skip(Math.Max(0, p.Diary.Count - 5)).ToList();
+            Label(box, diary.Count > 0 ? string.Join("\n", diary) : "아직 기록이 없다.", 17, new Vector2(280, -490), new Vector2(730, 130), Ink, TextAnchor.UpperLeft);
+            Button(box, "돌아가기", 22, new Vector2(280, -622), new Vector2(730, 64), Selected, close);
+        }
+
+        void Meter(Transform parent, string name, int value, Vector2 position, float width, Color color)
+        {
+            Label(parent, $"{name} {value}", 15, position, new Vector2(width, 22), Quiet, TextAnchor.MiddleLeft);
+            var back = Image(parent, position + new Vector2(0, -22), new Vector2(width, 12), Row);
+            var fill = Image(back.transform, Vector2.zero, new Vector2(width * value / 100f, 12), color);
+            fill.rectTransform.anchorMin = fill.rectTransform.anchorMax = fill.rectTransform.pivot = new Vector2(0, 0.5f);
+            fill.rectTransform.anchoredPosition = Vector2.zero;
+        }
+
+        void TraitBar(Transform parent, string name, int value, Vector2 position)
+        {
+            const float width = 230f, height = 12f, labelWidth = 90f;
+            Label(parent, name, 15, position, new Vector2(labelWidth, 24), Quiet, TextAnchor.MiddleLeft);
+            Image(parent, position + new Vector2(labelWidth, 0), new Vector2(width, height), Row);
+            Image(parent, position + new Vector2(labelWidth + width / 2f - 1f, 0), new Vector2(2f, height + 6f), Quiet);
+            if (value == 0) return;
+            float length = width / 2f * Mathf.Abs(value) / 3f;
+            float start = value > 0 ? labelWidth + width / 2f : labelWidth + width / 2f - length;
+            Image(parent, position + new Vector2(start, 0), new Vector2(length, height), value > 0 ? Art.Lime : Art.Pink);
+        }
+
         public void ShowChronicle(string title, IEnumerable<ChronicleEntry> entries, string closeText, Action close)
         {
             Clear(modalLayer);
             var box = ModalBox(860, 620);
             Label(box, title, 34, new Vector2(36, -54), new Vector2(790, 56), Art.Amber, TextAnchor.MiddleLeft, FontStyle.Bold);
             var list = entries.ToList();
-            string body = list.Count == 0 ? "남은 기록이 없습니다." : string.Join("\n", list.Skip(Math.Max(0, list.Count - 11)).Select(c => "· " + c.Text));
-            Label(box, body, 21, new Vector2(36, -300), new Vector2(790, 410), Ink, TextAnchor.UpperLeft);
+            string body = list.Count == 0 ? "남은 기록이 없습니다." : string.Join("\n", list.Skip(Math.Max(0, list.Count - 9)).Select(c => "· " + c.Text));
+            Label(box, body, 17, new Vector2(36, -300), new Vector2(790, 410), Ink, TextAnchor.UpperLeft);
             Button(box, closeText, 22, new Vector2(36, -566), new Vector2(790, 66), Selected, close);
         }
 
         public void ShowResult(string title, string body, string closeText, Action close)
         {
             Clear(modalLayer);
-            var box = ModalBox(720, 320);
+            var box = ModalBox(720, 400);
             Label(box, title, 32, new Vector2(36, -52), new Vector2(650, 54), Art.Amber, TextAnchor.MiddleLeft, FontStyle.Bold);
-            Label(box, body, 22, new Vector2(36, -148), new Vector2(650, 120), Ink, TextAnchor.UpperLeft);
-            Button(box, closeText, 22, new Vector2(36, -268), new Vector2(650, 64), Selected, close);
+            Label(box, body, 20, new Vector2(36, -190), new Vector2(650, 210), Ink, TextAnchor.UpperLeft);
+            Button(box, closeText, 22, new Vector2(36, -348), new Vector2(650, 64), Selected, close);
         }
 
         Transform ModalBox(float w, float h)
@@ -375,9 +449,9 @@ namespace SHI.Client
             if (portraits.TryGetValue(id, out var cached)) return cached;
             const int size = 256;
             int seed = id.GetHashCode() & 255;
-            Color accent = id == "yun" ? Art.Amber : id == "hanna" ? Art.Pink : id == "dohyun" ? Art.Lime : id == "seojin" ? Art.Cyan : id == "minjae" ? new Color(1f, 0.82f, 0.25f) : new Color(0.75f, 0.7f, 1f);
+            Color accent = id == "yun" ? Art.Amber : id == "hanna" ? Art.Pink : id == "dohyun" ? Art.Lime : id == "seojin" ? Art.Cyan : id == "minjae" ? new Color(1f, 0.82f, 0.25f) : id == "oh" || id == "stranger" ? new Color(0.75f, 0.7f, 1f) : RecruitColors[id.Sum(c => c) % RecruitColors.Length];
             var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { filterMode = FilterMode.Bilinear };
-            float hair = id == "hanna" || id == "seojin" ? 0.13f : 0.03f;
+            float hair = id == "hanna" || id == "seojin" || (id.StartsWith("r") && id.Sum(c => c) % 2 == 0) ? 0.13f : 0.03f;
             float headY = id == "minjae" ? 0.56f : 0.6f, headR = id == "minjae" ? 0.16f : 0.18f, shoulders = id == "oh" ? 0.27f : id == "dohyun" ? 0.42f : 0.34f;
             for (int y = 0; y < size; y++)
                 for (int x = 0; x < size; x++)
