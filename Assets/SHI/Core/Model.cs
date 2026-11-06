@@ -19,15 +19,29 @@ namespace SHI.Core
         public string Name;
         public string Title;
         public string Note;
+        public Temperament Temper;
+        public bool TemperKnown = true;
+        public int JoinedDay = 1;
         public Role Role;
         public Health Health = Health.Healthy;
         public bool Frail;
         public int Skill;
         public int InjuredDays;
+        public int Trust = 50;
+        public int Grievance = 10;
+        public int WatchedUntil = -1;
+        public bool Ashamed;
         public readonly HashSet<string> Memory = new HashSet<string>();
+        public readonly List<string> Diary = new List<string>();
+        public readonly Dictionary<string, int> Signs = new Dictionary<string, int>();
+        public readonly Dictionary<string, int> Cooldowns = new Dictionary<string, int>();
 
         public bool Present => Health == Health.Healthy || Health == Health.Injured;
         public bool CanWork => Health == Health.Healthy && !Frail;
+        public string Tag => "p:" + Id;
+
+        public void ChangeTrust(int amount) { Trust = Math.Max(0, Math.Min(100, Trust + amount)); }
+        public void ChangeGrievance(int amount) { Grievance = Math.Max(0, Math.Min(100, Grievance + amount)); }
     }
 
     public sealed class Building
@@ -65,6 +79,7 @@ namespace SHI.Core
     public sealed class GameEvent
     {
         public string Id;
+        public string CountId;
         public string Title;
         public string SpeakerId;
         public bool Major;
@@ -72,8 +87,11 @@ namespace SHI.Core
         public string[] Foreshadows = new string[0];
         public int Priority;
         public Func<Game, bool> Condition;
+        public Func<Game, Chance> Odds;
         public Func<Game, string> Body;
+        public Action<Game> OnQueue;
         public EventOption[] Options;
+        public string Reason;
     }
 
     public sealed class RaidResult

@@ -8,6 +8,7 @@ namespace SHI.Core
     {
         public const int GridSize = 12;
         public const int LastDay = 15;
+        public const int MaxEventsPerDay = 2;
 
         public static readonly Dictionary<BuildingType, BuildingInfo> Catalog = new Dictionary<BuildingType, BuildingInfo>
         {
@@ -49,6 +50,10 @@ namespace SHI.Core
         public bool ForcedRaid;
         public int DaysSinceRaid = 2;
         public RaidResult LastRaid;
+        public int YunRefusedDay = -1;
+        public int YunLedgerDay = -1;
+        public int Accepted;
+        public int Refused;
 
         public Game(int seed = 2327)
         {
@@ -58,11 +63,11 @@ namespace SHI.Core
             Stock[Res.Food] = 12;
             Stock[Res.Medicine] = 3;
 
-            AddPerson("yun", "윤 씨", "창고지기", "장부를 꼼꼼히 쓴다. 아픈 딸이 있다.", Role.Store, 0);
-            AddPerson("seojin", "서진", "탐사꾼", "폐허의 길을 잘 안다.", Role.Scrap, 1);
-            AddPerson("hanna", "한나", "간호사", "전쟁 전 병원에서 일했다. 남편 도현과 함께 왔다.", Role.Food, 0);
-            AddPerson("dohyun", "도현", "전직 군인", "말수가 적고 부당한 일을 참지 못한다.", Role.Guard, 1);
-            AddPerson("minjae", "민재", "수리공 견습생", "기지에서 가장 어리다.", Role.Battery, 0);
+            AddPerson("yun", "윤 씨", "창고지기", "장부를 꼼꼼히 쓴다. 아픈 딸이 있다.", Role.Store, 0, Temperaments.Get("family_first"));
+            AddPerson("seojin", "서진", "탐사꾼", "폐허의 길을 잘 안다.", Role.Scrap, 1, Temperaments.PickFrom(Rng, "optimist", "opportunist", "survivor", "daredevil"));
+            AddPerson("hanna", "한나", "간호사", "전쟁 전 병원에서 일했다. 남편 도현과 함께 왔다.", Role.Food, 0, Temperaments.PickFrom(Rng, "caregiver", "saving_face", "devoted"));
+            AddPerson("dohyun", "도현", "전직 군인", "말수가 적고 부당한 일을 참지 못한다.", Role.Guard, 1, Temperaments.PickFrom(Rng, "principled", "soldier", "avenger", "whistleblower"));
+            AddPerson("minjae", "민재", "수리공 견습생", "기지에서 가장 어리다.", Role.Battery, 0, Temperaments.PickFrom(Rng, "weak_will", "optimist", "coward", "climber"));
 
             Buildings.Add(new Building { Type = BuildingType.Shield, X = 5, Y = 5, W = 2, D = 2 });
             Buildings.Add(new Building { Type = BuildingType.Warehouse, X = 1, Y = 8, W = 3, D = 2 });
@@ -89,16 +94,22 @@ namespace SHI.Core
         public bool IsOver => Phase == Phase.End;
         public GameEvent CurrentEvent => PendingEvents.Count > 0 ? PendingEvents.Peek() : null;
 
-        public Person AddPerson(string id, string name, string title, string note, Role role, int skill, bool frail = false)
+        public Person AddPerson(string id, string name, string title, string note, Role role, int skill, Temperament temper, bool frail = false)
         {
-            var person = new Person { Id = id, Name = name, Title = title, Note = note, Role = role, Skill = skill, Frail = frail };
+            var person = new Person { Id = id, Name = name, Title = title, Note = note, Role = role, Skill = skill, Frail = frail, Temper = temper, JoinedDay = Day };
+            person.Trust += Rng.Next(-5, 6);
             People.Add(person);
             return person;
         }
 
         public void Add(Res res, int amount) { Stock[res] = Math.Max(0, Stock[res] + amount); }
         public void ChangeMorale(int amount) { Morale = Clamp(Morale + amount); }
-        public void ChangeAnger(int amount) { Anger = Clamp(Anger + amount); }
+        public void ChangeAnger(int amount)
+        {
+            Anger = Clamp(Anger + amount);
+            if (amount <= 0) return;
+            foreach (var p in People.Where(o => o.Present)) p.ChangeGrievance(amount / 3 + Math.Max(0, p.Temper.Grudge));
+        }
         public void ChangeDetection(int amount) { Detection = Clamp(Detection + amount); }
         static int Clamp(int value) => Math.Max(0, Math.Min(100, value));
 
@@ -220,6 +231,7 @@ namespace SHI.Core
                 case IndoorActivity.Care:
                     ChangeMorale(6);
                     ChangeAnger(-3);
+                    foreach (var p in People.Where(o => o.Present)) { p.ChangeGrievance(-4); p.ChangeTrust(1 + Math.Max(0, p.Temper.Empathy) / 2); }
                     Write("밤늦게까지 사람들의 이야기를 들었다.");
                     break;
                 case IndoorActivity.Overtime:
@@ -228,6 +240,7 @@ namespace SHI.Core
                     ChangeMorale(-3);
                     ChangeAnger(6);
                     OvertimeCount++;
+                    foreach (var p in People.Where(o => o.CanWork)) p.ChangeGrievance(4 + Math.Max(0, p.Temper.Self));
                     Record($"{Day}일차 밤에 야간 특근을 지시했다.", "overtime");
                     Write("야간 특근으로 자원을 더 모았다. 사람들이 지쳐 보인다.");
                     break;
@@ -251,6 +264,18 @@ namespace SHI.Core
             if (Phase != Phase.Night || !RaidTonight) return null;
             if (order == NightOrder.Overload) Add(Res.Battery, -2);
             int attack = AttackPower + Rng.Next(-2, 3), defense = DefensePower(order);
+            string fledText = "";
+            foreach (var guard in People.Where(p => p.CanWork && p.Role == Role.Guard).ToList())
+            {
+                var flee = new Chance(3).Trait("용기", guard.Temper.Courage, -6).Trait("자기보호", guard.Temper.Self, 3).Add("불만", guard.Grievance / 10).Add("신뢰", (50 - guard.Trust) / 10);
+                if (!flee.Roll(Rng)) continue;
+                defense -= 2 + guard.Skill + Math.Min(Weapons, 3);
+                guard.ChangeTrust(-10);
+                guard.Diary.Add($"{Day}일차: 습격 중에 도망쳤다.");
+                ChangeAnger(4);
+                fledText += $" {Ko.I(guard.Name)} 겁에 질려 자리를 떠났다.";
+                Record($"{Day}일차: {Ko.I(guard.Name)} 습격 중 자리를 떠났다. 이유 {flee.Explain()}", guard.Tag);
+            }
             int margin = defense - attack;
             var result = new RaidResult { Won = margin >= 0, Attack = attack, Defense = defense };
             var guards = People.Where(p => p.CanWork && p.Role == Role.Guard).ToList();
@@ -275,8 +300,28 @@ namespace SHI.Core
                 ChangeMorale(-12);
                 ChangeAnger(5);
                 int injuries = Math.Min(targets.Count, margin <= -4 ? 2 : 1);
-                for (int i = 0; i < injuries; i++) Injure(targets[i]);
-                result.Summary = "방어선이 무너져 자원을 빼앗기고 사람들이 다쳤다.";
+                string heroText = "";
+                for (int i = 0; i < injuries; i++)
+                {
+                    var target = targets[i];
+                    var hero = People.Where(p => p != target && p.Health == Health.Healthy && !p.Frail && !targets.Take(injuries).Contains(p)).OrderByDescending(p => p.Temper.Courage + p.Temper.Group).FirstOrDefault();
+                    if (hero != null)
+                    {
+                        var shield = new Chance(0).Trait("용기", hero.Temper.Courage, 5).Trait("공동체", hero.Temper.Group, 5).Trait("연민", hero.Temper.Empathy, 2).Add("신뢰", (hero.Trust - 50) / 5);
+                        if (shield.Roll(Rng))
+                        {
+                            Injure(hero);
+                            hero.ChangeTrust(5);
+                            target.ChangeTrust(8);
+                            ChangeMorale(4);
+                            heroText += $" {Ko.I(hero.Name)} {target.Name} 대신 공격을 맞았다.";
+                            Record($"{Day}일차: {Ko.I(hero.Name)} {target.Name} 대신 공격을 맞았다. 이유 {shield.Explain()}", hero.Tag);
+                            continue;
+                        }
+                    }
+                    Injure(target);
+                }
+                result.Summary = "방어선이 무너져 자원을 빼앗기고 사람들이 다쳤다." + heroText;
                 if (margin <= -8 && targets.Count > 0)
                 {
                     var victim = targets[Rng.Next(targets.Count)];
@@ -286,6 +331,7 @@ namespace SHI.Core
                     result.Summary += $" {Ko.Eun(victim.Name)} 돌아오지 못했다.";
                 }
             }
+            result.Summary += fledText;
             Write(result.Summary);
             Record($"{Day}일차 습격: {result.Summary}", "raid");
             LastRaid = result;
@@ -318,7 +364,8 @@ namespace SHI.Core
         {
             Phase = Phase.Day;
             int food = FoodUse;
-            if (Stock[Res.Food] >= food)
+            bool hungry = Stock[Res.Food] < food;
+            if (!hungry)
             {
                 Add(Res.Food, -food);
                 if (Ration == Ration.Reduced) { ChangeMorale(-3); ChangeAnger(2); }
@@ -360,6 +407,7 @@ namespace SHI.Core
             Recovery = Math.Min(100, Recovery + 1);
 
             TreatInjured();
+            UpdatePeople(hungry);
             CheckCollapse();
             if (IsOver) return;
             if (Day > LastDay)
@@ -370,6 +418,29 @@ namespace SHI.Core
             }
             RollRaid();
             QueueEvents();
+        }
+
+        void UpdatePeople(bool hungry)
+        {
+            int mood = 0;
+            foreach (var p in People.Where(o => o.Present))
+            {
+                mood += p.Temper.Mood;
+                if (Ration == Ration.Reduced) p.ChangeGrievance(2 + Math.Max(0, p.Temper.Self));
+                if (Ration == Ration.Generous) p.ChangeGrievance(-1);
+                if (hungry) p.ChangeGrievance(4 + Math.Max(0, p.Temper.Self));
+                if (p.CanWork && p.Role == Role.Rest) p.ChangeGrievance(-2);
+                if (p.Health == Health.Injured && Stock[Res.Medicine] == 0) p.ChangeGrievance(3);
+                if (p.Grievance >= 60) p.ChangeTrust(-1);
+                if (!p.TemperKnown && Day >= p.JoinedDay + 2)
+                {
+                    p.TemperKnown = true;
+                    Write($"함께 지내며 {p.Name}의 성향을 알게 됐다. {p.Temper.Name}.");
+                }
+                foreach (var old in p.Signs.Where(s => Day - s.Value >= 6).Select(s => s.Key).ToList()) p.Signs.Remove(old);
+            }
+            if (mood >= 2) ChangeMorale(1);
+            if (mood <= -2) ChangeMorale(-1);
         }
 
         void TreatInjured()
@@ -409,10 +480,35 @@ namespace SHI.Core
 
         void QueueEvents()
         {
-            var ready = Events.Where(e => !FiredEvents.Contains(e.Id) && e.Condition(this)).OrderByDescending(e => e.Priority).Take(2).ToList();
-            foreach (var e in ready)
+            var candidates = new List<GameEvent>();
+            foreach (var e in Events.Where(e => !FiredEvents.Contains(e.Id) && e.Condition(this)))
             {
+                var odds = e.Odds?.Invoke(this);
+                if (odds != null && !odds.Roll(Rng)) continue;
+                e.Reason = odds?.Explain();
+                candidates.Add(e);
+            }
+            if (Day >= 2) candidates.AddRange(NpcBehaviors.Roll(this));
+            if (Day >= 3 && Living < 10 && EventLibrary.HasStrangers(this))
+            {
+                var arrive = new Chance(10).Add("사기", Morale / 6).Add("탐지 위험", -Detection / 12).Add("돌려보낸 소문", -Refused * 3);
+                if (arrive.Roll(Rng))
+                {
+                    var stranger = EventLibrary.MakeStranger(this);
+                    stranger.Reason = arrive.Explain();
+                    candidates.Add(stranger);
+                }
+            }
+
+            var speakers = new HashSet<string>();
+            int taken = 0;
+            foreach (var e in candidates.OrderByDescending(e => e.Major).ThenByDescending(e => e.Priority))
+            {
+                if (taken >= MaxEventsPerDay) break;
+                if (e.SpeakerId != null && !speakers.Add(e.SpeakerId)) continue;
+                taken++;
                 FiredEvents.Add(e.Id);
+                e.OnQueue?.Invoke(this);
                 PendingEvents.Enqueue(e);
             }
         }
