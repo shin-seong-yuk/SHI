@@ -8,27 +8,30 @@ public static class Program
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         var report = Autoplayer.Run(5000);
-        Console.WriteLine($"[random] runs={report.Runs} avgDays={(double)report.TotalDays / report.Runs:F1} raids/run={(double)report.Raids / report.Runs:F2}");
+        Console.WriteLine($"[random] runs={report.Runs} avgDays={(double)report.TotalDays / report.Runs:F1} raids/run={(double)report.Raids / report.Runs:F2} events/day={(double)report.TotalEvents / report.TotalDays:F2}");
         foreach (var ending in report.Endings.OrderBy(e => e.Key)) Console.WriteLine($"  ending {ending.Key}: {ending.Value * 100.0 / report.Runs:F1}%");
         foreach (var e in report.EventCounts.OrderByDescending(e => e.Value)) Console.WriteLine($"  event {e.Key}: {e.Value * 100.0 / report.Runs:F1}%");
+        foreach (var e in report.TemperamentEvents.OrderByDescending(e => e.Value).Take(10)) Console.WriteLine($"  acts by {e.Key}: {e.Value}");
         var violations = report.Violations.Distinct().ToList();
         Console.WriteLine($"violations={report.Violations.Count} distinct={violations.Count}");
         foreach (var v in violations.Take(20)) Console.WriteLine("  " + v);
 
         foreach (var refuse in new[] { false, true })
         {
-            int survived = 0, betrayed = 0, totalMorale = 0, totalDetection = 0, totalRaids = 0;
+            int survived = 0, betrayed = 0, recruits = 0, lost = 0, totalMorale = 0, totalDetection = 0, totalRaids = 0;
             const int runs = 2000;
             for (int seed = 1; seed <= runs; seed++)
             {
                 var g = PlaySensibly(seed, refuse);
                 if (g.Ending == EndReason.Survived) survived++;
                 if (g.Flags.Contains("yun_betrayed")) betrayed++;
+                recruits += g.Accepted;
+                lost += g.People.Count(p => p.Health == Health.Gone || p.Health == Health.Dead);
                 totalMorale += g.Morale;
                 totalDetection += g.Detection;
                 totalRaids += g.Chronicle.Count(c => c.Tag == "raid");
             }
-            Console.WriteLine($"[sensible refuse={refuse}] survived={survived * 100.0 / runs:F1}% betrayed={betrayed * 100.0 / runs:F1}% avgMorale={totalMorale / runs} avgDetection={totalDetection / runs} raids={(double)totalRaids / runs:F1}");
+            Console.WriteLine($"[sensible refuse={refuse}] survived={survived * 100.0 / runs:F1}% betrayed={betrayed * 100.0 / runs:F1}% avgMorale={totalMorale / runs} avgDetection={totalDetection / runs} raids={(double)totalRaids / runs:F1} recruits={(double)recruits / runs:F1} lost={(double)lost / runs:F1}");
         }
         return violations.Count == 0 ? 0 : 1;
     }

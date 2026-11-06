@@ -12,6 +12,8 @@ namespace SHI.Core
         public readonly List<string> Violations = new List<string>();
         public int TotalDays;
         public int Raids;
+        public int TotalEvents;
+        public readonly Dictionary<string, int> TemperamentEvents = new Dictionary<string, int>();
     }
 
     public static class Autoplayer
@@ -41,8 +43,17 @@ namespace SHI.Core
             var current = game.CurrentEvent;
             if (current != null)
             {
-                report.EventCounts.TryGetValue(current.Id, out int count);
-                report.EventCounts[current.Id] = count + 1;
+                string key = current.CountId ?? current.Id;
+                report.EventCounts.TryGetValue(key, out int count);
+                report.EventCounts[key] = count + 1;
+                report.TotalEvents++;
+                if (string.IsNullOrEmpty(current.Body(game))) report.Violations.Add($"사건 {key}: 본문이 비어 있음");
+                var speaker = game.Find(current.SpeakerId ?? "");
+                if (speaker != null && key.StartsWith("실행:"))
+                {
+                    report.TemperamentEvents.TryGetValue(speaker.Temper.Name, out int acts);
+                    report.TemperamentEvents[speaker.Temper.Name] = acts + 1;
+                }
                 CheckEvent(game, current, report);
                 var options = current.Options.Select((o, i) => (o, i)).Where(x => x.o.Available == null || x.o.Available(game)).ToList();
                 if (options.Count == 0) { report.Violations.Add($"사건 {current.Id}: 고를 수 있는 선택지가 없음"); game.PendingEvents.Dequeue(); return; }
